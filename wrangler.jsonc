@@ -1,0 +1,31 @@
+{
+  "name": "nabard-doustan",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-01-01",
+  "workers_dev": true,
+  "rules": [
+    {
+      "type": "Text",
+      "globs": [
+        "**/*.html"
+      ],
+      "fallthrough": true
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "ROOMS",
+        "class_name": "BattleRoom"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "BattleRoom"
+      ]
+    }
+  ]
+}
