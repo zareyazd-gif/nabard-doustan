@@ -1,0 +1,114 @@
+name: Build Online Android APK
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/android-online.yml'
+      - 'index.html'
+permissions:
+  contents: read
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build signed debug APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/classes build/dex build/assets build/src/ir/ahalibazar/nabard
+          cp index.html build/assets/index.html
+          cat > build/AndroidManifest.xml <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="ir.ahalibazar.nabardonline" android:versionCode="2" android:versionName="2.0">
+            <uses-sdk android:minSdkVersion="23" android:targetSdkVersion="35"/>
+            <uses-permission android:name="android.permission.INTERNET"/>
+            <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+            <application android:label="نبرد دوستان آنلاین" android:usesCleartextTraffic="false" android:theme="@android:style/Theme.Material.NoActionBar" android:allowBackup="false" android:supportsRtl="true">
+              <activity android:name="ir.ahalibazar.nabard.MainActivity" android:exported="true" android:configChanges="orientation|screenSize|keyboardHidden">
+                <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
+              </activity>
+            </application>
+          </manifest>
+          EOF
+          cat > build/src/ir/ahalibazar/nabard/MainActivity.java <<'EOF'
+          package ir.ahalibazar.nabard;
+          import android.Manifest;
+          import android.app.*;
+          import android.os.Bundle;
+          import android.content.pm.PackageManager;
+          import android.graphics.Color;
+          import android.net.Uri;
+          import android.webkit.*;
+          import android.widget.*;
+          import android.view.*;
+          public class MainActivity extends Activity {
+            private WebView web;
+            private String origin="";
+            private PermissionRequest pending;
+            private boolean atMenu=true;
+            @Override public void onCreate(Bundle b){
+              super.onCreate(b);
+              getWindow().setStatusBarColor(Color.rgb(16,27,49));
+              getWindow().setNavigationBarColor(Color.rgb(16,27,49));
+              menu();
+            }
+            private void menu(){
+              if(pending!=null){pending.deny();pending=null;}
+              if(web!=null){web.destroy();web=null;}
+              atMenu=true;
+              LinearLayout l=new LinearLayout(this);l.setOrientation(1);l.setPadding(32,48,32,32);l.setBackgroundColor(Color.rgb(16,27,49));l.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+              TextView title=new TextView(this);title.setText("⚔ نبرد دوستان");title.setTextSize(30);title.setTextColor(Color.rgb(255,215,95));title.setGravity(Gravity.CENTER);l.addView(title);
+              Button online=new Button(this);online.setText("بازی آنلاین با دوستان");l.addView(online);online.setOnClickListener(v->address());
+              Button offline=new Button(this);offline.setText("تمرین آفلاین");l.addView(offline);offline.setOnClickListener(v->open(""));
+              TextView hint=new TextView(this);hint.setText("برای بازی آنلاین، همه بازیکنان باید آدرس HTTPS سرور منتشرشده را وارد کنند. هنوز سرور باید راه‌اندازی شود.");hint.setTextColor(Color.WHITE);hint.setTextSize(16);l.addView(hint);
+              setContentView(l);
+            }
+            private void address(){
+              EditText input=new EditText(this);input.setSingleLine(true);input.setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_VARIATION_URI);input.setHint("https://...workers.dev");input.setText(getPreferences(0).getString("server",""));
+              AlertDialog d=new AlertDialog.Builder(this).setTitle("آدرس سرور بازی").setMessage("لینک HTTPS منتشرشده بازی را وارد کن").setView(input).setNegativeButton("لغو",null).setPositiveButton("ورود",null).create();
+              d.setOnShowListener(v->d.getButton(-1).setOnClickListener(x->{String s=input.getText().toString().trim();Uri u=Uri.parse(s);if(!"https".equals(u.getScheme())||u.getHost()==null||u.getUserInfo()!=null||u.getQuery()!=null||u.getFragment()!=null){input.setError("آدرس معتبر HTTPS لازم است");return;}String root="https://"+u.getHost()+(u.getPort()==-1?"":":"+u.getPort());getPreferences(0).edit().putString("server",root).apply();d.dismiss();open(root);}));d.show();
+            }
+            private boolean trusted(Uri u){return u!=null&&!origin.isEmpty()&&"https".equals(u.getScheme())&&origin.equals("https://"+u.getHost()+(u.getPort()==-1?"":":"+u.getPort()));}
+            private void open(String server){
+              atMenu=false;origin=server;
+              LinearLayout l=new LinearLayout(this);l.setOrientation(1);l.setBackgroundColor(Color.rgb(16,27,49));
+              Button back=new Button(this);back.setText("بازگشت به منوی اصلی");back.setOnClickListener(v->menu());l.addView(back);
+              web=new WebView(this);web.setBackgroundColor(Color.rgb(16,27,49));l.addView(web,new LinearLayout.LayoutParams(-1,0,1));
+              WebSettings s=web.getSettings();s.setJavaScriptEnabled(true);s.setDomStorageEnabled(true);s.setAllowFileAccess(server.isEmpty());s.setAllowContentAccess(false);s.setAllowFileAccessFromFileURLs(false);s.setAllowUniversalAccessFromFileURLs(false);s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);s.setMediaPlaybackRequiresUserGesture(false);
+              web.setWebViewClient(new WebViewClient(){
+                @Override public boolean shouldOverrideUrlLoading(WebView w,WebResourceRequest r){return !trusted(r.getUrl());}
+                @Override public void onReceivedError(WebView w,WebResourceRequest r,WebResourceError e){if(r.isForMainFrame())Toast.makeText(MainActivity.this,"سرور بازی در دسترس نیست؛ آدرس را بررسی کن",Toast.LENGTH_LONG).show();}
+              });
+              web.setWebChromeClient(new WebChromeClient(){
+                @Override public void onPermissionRequest(PermissionRequest r){runOnUiThread(()->{
+                  if(!trusted(r.getOrigin())){r.deny();return;}
+                  boolean audio=false;for(String x:r.getResources())if(PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(x))audio=true;
+                  if(!audio){r.deny();return;}
+                  if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED){r.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});}
+                  else {if(pending!=null)pending.deny();pending=r;requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},12);}
+                });}
+                @Override public void onPermissionRequestCanceled(PermissionRequest r){if(pending==r)pending=null;}
+              });
+              setContentView(l);web.loadUrl(server.isEmpty()?"file:///android_asset/index.html":server+"/");
+            }
+            @Override public void onRequestPermissionsResult(int code,String[] p,int[] g){super.onRequestPermissionsResult(code,p,g);if(code==12&&pending!=null){PermissionRequest r=pending;pending=null;if(g.length>0&&g[0]==PackageManager.PERMISSION_GRANTED&&trusted(r.getOrigin()))r.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});else r.deny();}}
+            @Override public void onBackPressed(){if(!atMenu)menu();else super.onBackPressed();}
+            @Override protected void onDestroy(){if(pending!=null)pending.deny();if(web!=null)web.destroy();super.onDestroy();}
+          }
+          EOF
+          SDK="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          BT="$(find "$SDK/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+          PLATFORM="$(find "$SDK/platforms" -name android.jar | sort -V | tail -1)"
+          javac -source 8 -target 8 -classpath "$PLATFORM" -d build/classes build/src/ir/ahalibazar/nabard/MainActivity.java
+          "$BT/d8" --min-api 23 --lib "$PLATFORM" --output build/dex $(find build/classes -name '*.class')
+          "$BT/aapt2" link -I "$PLATFORM" --manifest build/AndroidManifest.xml -A build/assets -o build/unsigned.apk
+          (cd build/dex && zip -q ../unsigned.apk classes.dex)
+          "$BT/zipalign" -f -p 4 build/unsigned.apk build/aligned.apk
+          keytool -genkeypair -keystore build/debug.jks -storepass android -keypass android -alias androiddebugkey -dname "CN=Android Debug,O=Android,C=US" -keyalg RSA -keysize 2048 -validity 10000
+          "$BT/apksigner" sign --ks build/debug.jks --ks-pass pass:android --key-pass pass:android --out build/nabard-doustan-online.apk build/aligned.apk
+          "$BT/apksigner" verify --verbose build/nabard-doustan-online.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nabard-doustan-online-android
+          path: build/nabard-doustan-online.apk
+          retention-days: 7
