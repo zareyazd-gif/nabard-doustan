@@ -11,8 +11,8 @@ export class BattleRoom {
  async fetch(req){try{const b=await req.json(),now=Date.now();if(this.r&&now-this.r.touched>1800000)this.r=null;
  if(b.action==='create'){if(this.r)return error('این کد قبلاً استفاده شده است',409);const p=this.player(b.name);this.r={code:b.code,phase:'waiting',players:[p],deadline:0,game:null,touched:now};return json({token:p.token,...this.view(0)});}
  const r=this.r;if(!r)return error('اتاق پیدا نشد یا بسته شده است',404);
- if(b.action==='join'){if(r.phase!=='waiting')return error('بازی شروع شده است');const p=this.player(b.name);r.players.push(p);r.touched=now;return json({token:p.token,...this.view(r.players.length-1)});}
- let i=r.players.findIndex(p=>p.token===b.token);if(i<0)return error('دسترسی نامعتبر',403);const p=r.players[i];p.seen=now;r.touched=now;this.tick(now);
+ if(b.action==='join'){if(r.phase!=='waiting')return error('بازی شروع شده است');r.players=r.players.filter((p,j)=>j===0||now-p.seen<15000);const p=this.player(b.name);r.players.push(p);r.touched=now;return json({token:p.token,...this.view(r.players.length-1)});}
+ let i=typeof b.token==='string'&&b.token?r.players.findIndex(p=>p.token===b.token):-1;if(i<0)return error('دسترسی نامعتبر',403);const p=r.players[i];p.seen=now;r.touched=now;this.tick(now);
  switch(b.action){
  case 'poll':if(r.phase==='battle'){const k=b.input||{};p.input={left:!!k.left,right:!!k.right,up:!!k.up,down:!!k.down,hit:!!k.hit};}break;
  case 'beginVoice':if(i!==0||r.phase!=='waiting')return error('فقط میزبان گفتگو را آغاز می‌کند');r.players=r.players.filter((p,j)=>j===0||now-p.seen<15000);if(r.players.length<2)return error('حداقل دو بازیکن حاضر لازم است');r.phase='voice';r.deadline=now+100000;break;
